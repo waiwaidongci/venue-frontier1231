@@ -19,9 +19,9 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 | 邮箱 | 角色 | 页面与动作 |
 |---|---|---|
-| admin@qiyuan.demo | admin / 评议负责人 | 六页；登记、导入、求解、提案、审阅批准、下载 |
-| analyst@qiyuan.demo | analyst / 场馆分析员 | 六页；登记、导入、求解、提案、下载；不能批准 |
-| viewer@qiyuan.demo | viewer / 机构联络员 | 六页只读，可下载获批机构评议CSV；不能写入或批准 |
+| admin@qiyuan.demo | admin / 评议负责人 | 六页；登记、导入、求解、提案、按看到的版本批准、撤回重议、下载当前有效版并追溯全部历史档案 |
+| analyst@qiyuan.demo | analyst / 场馆分析员 | 六页；登记、导入、求解、提案与草稿修订（含撤回后重议）、下载；不能批准或撤回 |
+| viewer@qiyuan.demo | viewer / 机构联络员 | 六页只读，只能下载当前有效批准版机构评议CSV；不能写入、批准、撤回或追溯历史 |
 
 JWT有效期8小时，密码带盐PBKDF2-SHA256；独立审计与错误中间件，登录每来源每分钟最多30次。对外部署前更换演示凭证与JWT密钥。
 
@@ -34,7 +34,19 @@ JWT有效期8小时，密码带盐PBKDF2-SHA256；独立审计与错误中间件
 5. 10:20 选择水岸青年馆，查看投入投影、额外松弛与产出盈余，辨别它们各自的口径。
 6. 10:30 看三个共同标杆逐一移除情景；每情景对所有原目标使用同一R减b，读出参照依赖。
 7. 11:00 写下“开放时段与照明排程复核”假设，先核对统计边界，安排两周现场观察。
-8. 11:20 许栖使用admin审阅，何禾使用viewer下载包含研究指纹的机构评议CSV。
+8. 11:20 许栖使用admin按看到的版本审阅，何禾使用viewer下载包含研究指纹的当前有效机构评议CSV；现场复核改写假设时先撤回再重议，旧档案由负责人追溯。
+
+## 草稿修订、按版本批准与不可变档案
+
+现场复核常会改写改进假设，而负责人可能还在审阅旧稿，因此评议采用乐观版本控制与只追加档案：
+
+- 草稿（`draft`）可由分析员反复修订，每次保存令`revision+1`；修订请求必须携带看到的`expected_revision`，与服务端当前版本不一致返回409版本冲突，要求刷新后按新版本重议。已批准（`approved`）期间禁止直接修订。
+- 批准与撤回都按看到的版本执行：负责人提交`expected_revision`，旧稿批准请求返回409并提示当前版本号，避免批准过期内容。
+- 每次批准生成一条`case_archives`不可变快照，固定批准当时的研究指纹（run fingerprint）、机构投影（θ、投入松弛、产出盈余、投影、参照λ、机构口径与期间）以及评议文字（标题、假设、复核计划、批准人、批准时间）。
+- 撤回仅把有效档案置为`withdrawn`并记录撤回时间，假设回到`withdrawn`；之后修订重新进入`draft`，再次批准只新增档案。重新批准不能改写旧档案，历史档案保留`withdrawn`/`superseded`状态与原始内容；同一时间至多一条`effective`档案。
+- 联络员（及负责人）只能下载当前`effective`档案生成的CSV，撤回或待评议期间下载返回409；历史版本列表与追溯下载仅admin可用。CSV文件名含版本号，列含`revision`与`run_fingerprint`。
+
+接口：`PATCH /cases/{id}`（修订）、`PATCH /cases/{id}/approve`、`PATCH /cases/{id}/withdraw`、`GET /cases/{id}/archives`（admin）、`GET /cases/{id}/export`（有效版）、`GET /cases/{id}/archives/{archive_id}/export`（admin追溯）。结构演进见`migrations/002_case_versioning.sql`。
 
 ## CCR、松弛与敏感性的口径
 
@@ -67,7 +79,7 @@ min θ
 
 ## 页面、实体与共享组件
 
-六页：研究总览、同期样本、效率求解、参照与敏感性、改进假设、评议留痕。五核心实体BenchmarkSet、Venue、PeriodObservation、EfficiencyRun、ImprovementCase各有model/schema/service/controller/route/前端API/store/页面链路。
+六页：研究总览、同期样本、效率求解、参照与敏感性、改进假设、评议留痕。核心实体BenchmarkSet、Venue、PeriodObservation、EfficiencyRun、ImprovementCase及只追加的CaseArchive各有model/schema/service/controller/route/前端API/store/页面链路。
 
 共用业务组件BenchmarkSelect、EfficiencyPlot、FrontierSummary、RunTable；通用PageHeading/StatusBadge/ErrorNotice/EmptyState。useTask管理恢复状态，usePolling只刷新运行中研究，createStore使用React原生useSyncExternalStore。
 
@@ -83,7 +95,7 @@ min θ
 | worker | 单Python消费者；DB任务状态为事实源，Redis唤醒并恢复queued/running |
 | db/redis | PostgreSQL16、Redis7 AOF |
 
-恰好五服务，均有healthcheck；backend等db/redis healthy；worker再等backend初始化；frontend等backend。命名卷包括数据库、Redis、后端/worker共享产物。当前求解结果在DB、CSV实时生成，共享卷保留扩展通道。初始schema由metadata创建，migrations记录v1自然键，未包含生产schema升级工具。
+恰好五服务，均有healthcheck；backend等db/redis healthy；worker再等backend初始化；frontend等backend。命名卷包括数据库、Redis、后端/worker共享产物。当前求解结果在DB、CSV实时生成，共享卷保留扩展通道。初始schema由metadata创建，migrations记录v1自然键与v2评议版本化（case_archives只追加、improvement_cases.revision），未包含生产schema升级工具。
 
 `frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`。
 

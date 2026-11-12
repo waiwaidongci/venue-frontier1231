@@ -1,7 +1,7 @@
 import random,json
 from sqlalchemy import select,func
 from src.config.database import Base,engine,Session
-from src.models import User,BenchmarkSet,Venue,PeriodObservation,EfficiencyRun,ImprovementCase
+from src.models import User,BenchmarkSet,Venue,PeriodObservation,EfficiencyRun,ImprovementCase,CaseArchive
 from src.utils.security import hash_password
 from src.services.run_service import execute_run
 
@@ -31,6 +31,10 @@ def seed():
         latest=db.scalar(select(EfficiencyRun).order_by(EfficiencyRun.id.desc()))
         if latest and latest.status=='completed' and not db.scalar(select(ImprovementCase).where(ImprovementCase.title=='水岸青年馆 · 开放时段与照明排程复核')):
             target=next(r for r in latest.result['baseline'] if r['venue_code']=='QY-05')
-            db.add(ImprovementCase(title='水岸青年馆 · 开放时段与照明排程复核',run_id=latest.id,observation_id=target['observation_id'],hypothesis='先复核同期开馆工时与照明排程的统计边界，再用活动日观察验证投入缩减假设。',verification='由机构联络员核对季度口径，安排两周现场观察；不作为个人绩效、自动拨款或直接预算削减依据。',status='approved',approved_by='admin@qiyuan.demo'))
-        db.commit();print(json.dumps({m.__tablename__:db.scalar(select(func.count()).select_from(m)) for m in (User,BenchmarkSet,Venue,PeriodObservation,EfficiencyRun,ImprovementCase)},ensure_ascii=False))
+            case=ImprovementCase(title='水岸青年馆 · 开放时段与照明排程复核',run_id=latest.id,observation_id=target['observation_id'],hypothesis='先复核同期开馆工时与照明排程的统计边界，再用活动日观察验证投入缩减假设。',verification='由机构联络员核对季度口径，安排两周现场观察；不作为个人绩效、自动拨款或直接预算削减依据。',status='approved',revision=1,approved_by='admin@qiyuan.demo')
+            db.add(case);db.flush()
+            snapshot={k:target.get(k) for k in ('observation_id','venue_code','venue_name','theta','strong_efficient','zero_output','input_slack','output_slack','projected_inputs','projected_outputs','peers','source')}
+            snapshot['period']=latest.result.get('period');snapshot['benchmark_name']=latest.result.get('benchmark_name')
+            db.add(CaseArchive(case_id=case.id,revision=1,title=case.title,run_id=latest.id,observation_id=target['observation_id'],hypothesis=case.hypothesis,verification=case.verification,run_fingerprint=latest.result['fingerprint'],snapshot=snapshot,approved_by='admin@qiyuan.demo',archive_status='effective'))
+        db.commit();print(json.dumps({m.__tablename__:db.scalar(select(func.count()).select_from(m)) for m in (User,BenchmarkSet,Venue,PeriodObservation,EfficiencyRun,ImprovementCase,CaseArchive)},ensure_ascii=False))
 if __name__=='__main__':seed()

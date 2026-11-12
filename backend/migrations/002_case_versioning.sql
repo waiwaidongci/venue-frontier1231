@@ -1,0 +1,30 @@
+-- Schema v2: 评议假设版本化与获批档案不可变。
+-- 新库仍由 SQLAlchemy metadata 直接创建；本文件记录从 v1 自然键演进的结构变更，
+-- 已存在的本地演示库可重建（docker compose down -v）或按下列语句手工升级。
+--
+-- ALTER TABLE improvement_cases ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+-- ALTER TABLE improvement_cases ADD COLUMN updated_at DATETIME;
+-- UPDATE improvement_cases SET status='withdrawn' WHERE status NOT IN ('draft','approved');
+--
+-- CREATE TABLE case_archives (
+--   id INTEGER PRIMARY KEY,
+--   case_id INTEGER NOT NULL REFERENCES improvement_cases(id),
+--   revision INTEGER NOT NULL,
+--   title VARCHAR(160) NOT NULL,
+--   run_id INTEGER NOT NULL REFERENCES efficiency_runs(id),
+--   observation_id INTEGER NOT NULL REFERENCES period_observations(id),
+--   hypothesis VARCHAR(1200) NOT NULL,
+--   verification VARCHAR(1000) NOT NULL,
+--   run_fingerprint VARCHAR(80) NOT NULL DEFAULT '',
+--   snapshot JSON NOT NULL DEFAULT '{}',
+--   approved_by VARCHAR(160) NOT NULL,
+--   approved_at DATETIME NOT NULL,
+--   archive_status VARCHAR(20) NOT NULL DEFAULT 'effective',
+--   withdrawn_at DATETIME
+-- );
+-- CREATE INDEX ix_case_archives_case_id ON case_archives(case_id);
+-- CREATE INDEX ix_case_archives_archive_status ON case_archives(archive_status);
+--
+-- 自然键：case_archives(case_id,revision)——同一假设的同一版本至多一条获批档案；
+-- 档案只追加，撤回仅更新 archive_status/withdrawn_at，不回写任何快照字段。
+SELECT 'venue-frontier schema v2';

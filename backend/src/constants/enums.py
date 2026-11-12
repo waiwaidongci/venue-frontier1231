@@ -11,5 +11,10 @@ class RunStatus(StrEnum):
 class CaseStatus(StrEnum):
     DRAFT='draft'
     APPROVED='approved'
+    WITHDRAWN='withdrawn'
+class ArchiveStatus(StrEnum):
+    EFFECTIVE='effective'
+    WITHDRAWN='withdrawn'
+    SUPERSEDED='superseded'
 INPUTS=('staff_hours','energy_cost')
 OUTPUTS=('visits','programs')

@@ -27,6 +27,8 @@ out/
 coverage/
 *.pyc
 venv/
+.pylibs/
+test-artifacts/
 target/
 *.o
 *.obj
